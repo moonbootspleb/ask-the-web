@@ -76,9 +76,44 @@ def _status_banner() -> str | None:
     )
 
 
-def _format_sources_html(sources: list[dict]) -> str:
+def _format_sources_footnote(sources: list[dict]) -> str:
+    """Compact markdown footnote appended to the assistant reply."""
+    if not sources:
+        return ""
+    links: list[str] = []
+    seen: set[str] = set()
+    for i, s in enumerate(sources, 1):
+        url = (s.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        title = html.unescape(s.get("title") or "Source")
+        if len(title) > 72:
+            title = title[:69] + "…"
+        links.append(f"[{len(links) + 1}] [{title}]({url})")
+    if not links:
+        return ""
+    return "\n\n---\n" + " · ".join(links)
+
+
+def _format_sources_html(sources: list[dict], *, compact: bool = False) -> str:
     if not sources:
         return "<p style='color:rgba(255,255,255,0.5);margin:0;'>No sources yet.</p>"
+    if compact:
+        items = []
+        for i, s in enumerate(sources, 1):
+            title = html.escape(s.get("title") or "Source")
+            url = html.escape(s.get("url") or "")
+            if not url:
+                continue
+            link = f'<a href="{url}" target="_blank" rel="noopener" style="color:#8edce6;">{title}</a>'
+            items.append(
+                f'<span style="margin-right:0.65rem;">[{i}] {link}</span>'
+            )
+        return (
+            f'<p style="margin:0;font-size:0.82em;line-height:1.6;color:rgba(255,255,255,0.55);">'
+            f'{" ".join(items)}</p>'
+        )
     blocks = []
     for i, s in enumerate(sources, 1):
         title = html.escape(s.get("title") or "Source")
@@ -103,10 +138,7 @@ def _format_sources_html(sources: list[dict]) -> str:
 def _format_steps_html(steps: list[dict]) -> str:
     if not steps:
         return ""
-    blocks = [
-        '<p style="margin:0 0 0.5rem;font-size:0.72rem;font-family:monospace;'
-        'letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.38);">Agent trace</p>'
-    ]
+    blocks = []
     for i, step in enumerate(steps, 1):
         tool = html.escape(step.get("tool", "tool"))
         inp = html.escape(step.get("input", ""))
@@ -129,7 +161,11 @@ def _format_steps_html(steps: list[dict]) -> str:
             f'<summary style="cursor:pointer;color:{INK};font-family:monospace;font-size:0.88em;">'
             f"Step {i}: {tool}</summary>{input_html}{output_html}</details>"
         )
-    return "".join(blocks)
+    inner = "".join(blocks)
+    return (
+        f'<details class="ask-web-trace"><summary>Agent trace</summary>'
+        f'<div style="margin-top:0.35rem;">{inner}</div></details>'
+    )
 
 
 def stage_user_message(message: str, history: list[dict]) -> tuple[list[dict], dict]:
@@ -143,27 +179,31 @@ def stage_user_message(message: str, history: list[dict]) -> tuple[list[dict], d
 
 def complete_assistant_response(
     history: list[dict],
-) -> tuple[list[dict], dict, str, str, dict]:
+) -> tuple[list[dict], dict, str, dict]:
     if not history or history[-1].get("role") != "user":
-        return history, {}, "", "", gr.update(interactive=True)
+        return history, {}, "", gr.update(interactive=True)
 
     question = _content_text(history[-1].get("content")).strip()
     if not question:
-        return history, {}, "", "", gr.update(interactive=True)
+        return history, {}, "", gr.update(interactive=True)
 
     try:
         result = agent_core.invoke_with_trace(question)
         answer = result["answer"]
+        sources = result.get("sources") or []
         if not result.get("llm_available"):
             answer = (
                 f"_{agent_core.NO_LLM_MESSAGE}_\n\n**Raw search preview:**\n\n"
-                f"{agent_core.format_search_results(result.get('sources', []))}"
+                f"{agent_core.format_search_results(sources)}"
             )
+        else:
+            footnote = _format_sources_footnote(sources)
+            if footnote:
+                answer = answer + footnote
         steps_html = _format_steps_html(result.get("tool_steps") or [])
         return (
             history + [{"role": "assistant", "content": answer}],
             result,
-            _format_sources_html(result.get("sources") or []),
             steps_html,
             gr.update(interactive=True),
         )
@@ -172,7 +212,6 @@ def complete_assistant_response(
         return (
             history + [{"role": "assistant", "content": err}],
             {},
-            "",
             f"<pre style='color:rgba(255,255,255,0.55);font-size:0.85em;'>{html.escape(traceback.format_exc())}</pre>",
             gr.update(interactive=True),
         )
@@ -181,11 +220,11 @@ def complete_assistant_response(
 def run_sources_only(query: str) -> str:
     if not query.strip():
         return "Enter a search query."
-    return _format_sources_html(agent_core.search_web_raw(query))
+    return _format_sources_html(agent_core.search_web_raw(query), compact=True)
 
 
 def clear_chat() -> tuple:
-    return WELCOME_MESSAGE, {}, "", "", gr.update(interactive=True)
+    return WELCOME_MESSAGE, {}, "", gr.update(interactive=True)
 
 
 _moonboots_theme = build_moonboots_theme()
@@ -203,7 +242,7 @@ with gr.Blocks(title="Ask the Web", fill_width=True) as demo:
             with gr.Column(elem_classes="ask-web-chat-shell"):
                 chatbot = gr.Chatbot(
                     value=WELCOME_MESSAGE,
-                    height=280,
+                    height=480,
                     show_label=False,
                     layout="bubble",
                     autoscroll=True,
@@ -234,32 +273,32 @@ with gr.Blocks(title="Ask the Web", fill_width=True) as demo:
                         gr.HTML(
                             '<p class="everstorm-chat-hint">Enter to send · Shift+Enter for new line</p>',
                         )
-            ask_sources = gr.HTML(value="", elem_classes="ask-web-sources")
             ask_steps = gr.HTML(value="", elem_classes="ask-web-steps")
             gr.Examples(examples=[[q] for q in EXAMPLE_QUESTIONS], inputs=chat_in)
 
         with gr.Tab("Sources"):
             src_q = gr.Textbox(label="Search query", lines=2, placeholder="e.g. latest AI agent frameworks")
             src_btn = gr.Button("Search", variant="primary")
-            src_out = gr.HTML()
+            src_out = gr.HTML(elem_classes="ask-web-sources-tab")
             src_btn.click(run_sources_only, inputs=src_q, outputs=src_out)
             gr.Examples(examples=[[q] for q in EXAMPLE_QUESTIONS], inputs=src_q)
 
         with gr.Tab("Steps"):
             gr.Markdown(
-                "After you submit on **Ask**, the trace below **Sources** shows each step: "
-                "**search_web** → **synthesize_answer** (LLM summary), and **snippet_fallback** if needed."
+                "After you submit on **Ask**, expand **Agent trace** under the chat to see "
+                "**search_web** → **synthesize_answer** (and **snippet_fallback** if needed). "
+                "Sources appear as footnotes on each reply."
             )
 
     _submit = dict(fn=stage_user_message, inputs=[chat_in, chatbot], outputs=[chatbot, chat_in])
     _reply = dict(
         fn=complete_assistant_response,
         inputs=[chatbot],
-        outputs=[chatbot, last_result, ask_sources, ask_steps, chat_in],
+        outputs=[chatbot, last_result, ask_steps, chat_in],
     )
     chat_btn.click(**_submit).then(**_reply)
     chat_in.submit(**_submit).then(**_reply)
-    clear_btn.click(clear_chat, outputs=[chatbot, last_result, ask_sources, ask_steps, chat_in])
+    clear_btn.click(clear_chat, outputs=[chatbot, last_result, ask_steps, chat_in])
 
 demo.launch(
     ssr_mode=False,

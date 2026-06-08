@@ -400,8 +400,34 @@ footer {{ display: none !important; }}
 
 .ask-web-chat-messages .bubble-wrap,
 .ask-web-chat-messages [class*="chatbot"] {{
-    max-height: min(40vh, 340px) !important;
+    max-height: min(62vh, 520px) !important;
     overflow-y: auto !important;
+}}
+
+.ask-web-chat-shell .bot hr,
+.ask-web-chat-shell .bubble.bot hr {{
+    margin: 0.65rem 0 0.45rem !important;
+    border: none !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+}}
+
+.ask-web-chat-shell .bot p:last-child,
+.ask-web-chat-shell .bubble.bot p:last-child {{
+    font-size: 0.82em !important;
+    line-height: 1.55 !important;
+    color: rgba(255, 255, 255, 0.52) !important;
+    margin-top: 0 !important;
+}}
+
+.ask-web-chat-shell .bot a,
+.ask-web-chat-shell .bubble.bot a {{
+    color: #8edce6 !important;
+    text-decoration: none !important;
+}}
+
+.ask-web-chat-shell .bot a:hover,
+.ask-web-chat-shell .bubble.bot a:hover {{
+    text-decoration: underline !important;
 }}
 
 .ask-web-chat-shell .bubble,
@@ -489,30 +515,52 @@ footer {{ display: none !important; }}
     margin: 0 !important;
 }}
 
-.ask-web-sources {{
+.ask-web-sources-tab {{
     margin-top: 0.35rem !important;
 }}
 
-.ask-web-sources .block,
-.ask-web-sources .wrap,
-.ask-web-sources .form {{
+.ask-web-sources-tab .block,
+.ask-web-sources-tab .wrap,
+.ask-web-sources-tab .form {{
     background: transparent !important;
     border: none !important;
     padding: 0 !important;
+}}
+
+.ask-web-steps {{
+    margin-top: 0.35rem !important;
+}}
+
+.ask-web-steps:empty {{
+    display: none !important;
+}}
+
+.ask-web-trace {{
+    border: 1px solid {HAIRLINE};
+    border-radius: 0.65rem;
+    padding: 0.35rem 0.65rem;
+    background: {ORBITAL};
+}}
+
+.ask-web-trace > summary {{
+    cursor: pointer;
+    font-family: ui-monospace, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.38);
+    list-style: none;
+    padding: 0.25rem 0;
+}}
+
+.ask-web-trace > summary::-webkit-details-marker {{
+    display: none;
 }}
 
 .ask-web-examples {{
     margin-top: 0.5rem !important;
     margin-bottom: 0 !important;
     width: 100% !important;
-}}
-
-.ask-web-steps {{
-    margin-top: 0.25rem !important;
-}}
-
-.ask-web-steps:empty {{
-    display: none !important;
 }}
 
 .gradio-container .tabs {{
