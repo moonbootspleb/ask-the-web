@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 from ddgs import DDGS
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 
@@ -24,6 +24,14 @@ Rules:
 3) Cite sources inline using markdown links: [title](url).
 4) If search results are insufficient, say what is missing.
 5) Be concise and direct."""
+
+SYNTHESIS_PROMPT = """You are a helpful research assistant. You are given DuckDuckGo search results.
+
+Rules:
+1) Answer ONLY from the search results — do not invent facts.
+2) Cite sources inline using markdown links: [title](url).
+3) If results are insufficient, say what is missing.
+4) Be concise and direct. Do not output JSON or tool calls."""
 
 NO_LLM_MESSAGE = (
     "LLM not configured. Set **OLLAMA_BASE_URL** (remote Ollama via Tailscale Funnel) "
@@ -154,23 +162,66 @@ def _extract_urls(text: str) -> list[str]:
     return re.findall(r"https?://[^\s\])>\"']+", text)
 
 
-def invoke_with_trace(question: str) -> dict[str, Any]:
-    """Run the web agent and return answer, sources, and tool steps."""
-    if not isinstance(question, str):
-        question = str(question)
-    if not question.strip():
-        return {"answer": "Enter a question.", "sources": [], "tool_steps": [], "llm_available": False}
+def _results_to_sources(results: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [
+        {
+            "title": row.get("title") or row.get("url") or "Source",
+            "url": row.get("url") or "",
+            "snippet": row.get("snippet") or "",
+        }
+        for row in results
+        if row.get("url")
+    ]
 
-    llm = get_llm()
-    if llm is None:
-        results = search_web_raw(question)
+
+def _looks_like_tool_json(text: str) -> bool:
+    t = text.strip()
+    return t.startswith("{") and '"name"' in t and ("parameters" in t or "args" in t)
+
+
+def _invoke_search_then_answer(question: str, llm: ChatOllama) -> dict[str, Any]:
+    """Reliable Perplexity-style path: search first, then synthesize with the LLM."""
+    query = question.strip()
+    results = search_web_raw(query)
+    search_blob = format_search_results(results)
+    tool_steps = [{"tool": "search_web", "input": query, "output": search_blob}]
+    sources = _results_to_sources(results)
+
+    if not results:
         return {
-            "answer": NO_LLM_MESSAGE,
-            "sources": results,
-            "tool_steps": [{"tool": "search_web", "input": question, "output": format_search_results(results)}],
-            "llm_available": False,
+            "answer": "I couldn't find web results for that query. Try rephrasing or check the **Sources** tab.",
+            "sources": [],
+            "tool_steps": tool_steps,
+            "llm_available": True,
         }
 
+    response = llm.invoke(
+        [
+            SystemMessage(content=SYNTHESIS_PROMPT),
+            HumanMessage(content=f"Question: {query}\n\nSearch results:\n{search_blob}"),
+        ]
+    )
+    answer = _message_content(response).strip()
+    if not answer or _looks_like_tool_json(answer):
+        answer = (
+            f"I found results for **{query}**, but couldn't summarize them cleanly. "
+            "See the sources below."
+        )
+
+    for url in _extract_urls(answer):
+        if not any(s["url"] == url for s in sources):
+            sources.append({"title": url, "url": url, "snippet": ""})
+
+    return {
+        "answer": answer,
+        "sources": sources,
+        "tool_steps": tool_steps,
+        "llm_available": True,
+    }
+
+
+def _invoke_langchain_agent(question: str) -> dict[str, Any]:
+    """Native tool-calling agent — used when the model returns real tool_calls."""
     agent = get_web_agent()
     result = agent.invoke({"messages": [{"role": "user", "content": question.strip()}]})
 
@@ -191,39 +242,55 @@ def invoke_with_trace(question: str) -> dict[str, Any]:
                 sources.append({"title": url, "url": url, "snippet": ""})
         elif isinstance(msg, AIMessage):
             text = _message_content(msg)
-            if text.strip():
+            if text.strip() and not _looks_like_tool_json(text):
                 answer = text
             for tc in getattr(msg, "tool_calls", None) or []:
                 if isinstance(tc, dict):
                     name = tc.get("name", "tool")
                     args = tc.get("args", {})
                     query = args.get("query", str(args))
-                    tool_steps.append({"tool": name, "input": query, "output": ""})
+                    tool_steps.append({"tool": name, "input": str(query), "output": ""})
 
-    # Enrich sources from search output in tool messages
     if not sources and tool_steps:
         for step in tool_steps:
-            if step["tool"] == "search_web" and step["output"]:
-                for i, line in enumerate(step["output"].split("\n")):
+            if "search" in step["tool"].lower() and step["output"]:
+                for line in step["output"].split("\n"):
                     if line.strip().startswith("URL:"):
                         url = line.split("URL:", 1)[1].strip()
-                        title = ""
-                        if i > 0:
-                            prev = step["output"].split("\n")[max(0, i - 1)]
-                            if ". " in prev:
-                                title = prev.split(". ", 1)[1]
-                        sources.append({"title": title or url, "url": url, "snippet": ""})
+                        sources.append({"title": url, "url": url, "snippet": ""})
 
     for url in _extract_urls(answer):
         if not any(s["url"] == url for s in sources):
             sources.append({"title": url, "url": url, "snippet": ""})
 
     return {
-        "answer": answer or "No answer generated.",
+        "answer": answer,
         "sources": sources,
         "tool_steps": tool_steps,
         "llm_available": True,
     }
+
+
+def invoke_with_trace(question: str) -> dict[str, Any]:
+    """Run the web agent and return answer, sources, and tool steps."""
+    if not isinstance(question, str):
+        question = str(question)
+    if not question.strip():
+        return {"answer": "Enter a question.", "sources": [], "tool_steps": [], "llm_available": False}
+
+    llm = get_llm()
+    if llm is None:
+        results = search_web_raw(question)
+        return {
+            "answer": NO_LLM_MESSAGE,
+            "sources": _results_to_sources(results),
+            "tool_steps": [{"tool": "search_web", "input": question, "output": format_search_results(results)}],
+            "llm_available": False,
+        }
+
+    # Remote Ollama often emits malformed tool JSON in content instead of executing tools.
+    # Search-then-synthesize is reliable for the public demo.
+    return _invoke_search_then_answer(question, llm)
 
 
 # --- Manual tool-calling helpers (notebook sections 1–2) ---

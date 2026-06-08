@@ -6,7 +6,7 @@ Production demo: **Gradio on HF CPU basic** embedded on the React blog. LLM runs
 |-------|--------|
 | Space source | [`BYTEBTYEGO/demos-3/`](.) |
 | Blog embed | `COMPANYSITE` → `/blog/building-an-ask-the-web-agent` |
-| Netlify env | `VITE_ASK_THE_WEB_SPACE_URL` |
+| Netlify (site) | HF embed URL hardcoded in `COMPANYSITE/src/lib/askTheWebSpaceUrls.ts` |
 
 ---
 
@@ -100,11 +100,7 @@ After saving secrets, wait for **Building** → **Running**.
 
 ## 7. Embed on Netlify (moonboots.tech)
 
-```bash
-VITE_ASK_THE_WEB_SPACE_URL=https://huggingface.co/spaces/moonbootspleb/ask-the-web
-```
-
-Clear cache and redeploy. Open `https://moonboots.tech/blog/building-an-ask-the-web-agent`.
+The blog embed URL is **hardcoded** in `COMPANYSITE/src/lib/askTheWebSpaceUrls.ts` (no Netlify env var). After pushing COMPANYSITE changes, clear cache and redeploy. Open `https://moonboots.tech/blog/building-an-ask-the-web-agent`.
 
 ---
 
