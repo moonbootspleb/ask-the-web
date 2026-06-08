@@ -1,0 +1,5 @@
+gradio>=6.0.0,<7.0.0
+langchain==1.2.15
+langchain-core==1.2.26
+langchain-ollama==1.0.1
+ddgs==9.10.0
