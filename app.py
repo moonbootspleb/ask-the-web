@@ -45,14 +45,14 @@ WELCOME_MESSAGE = [
 
 
 def _status_banner() -> str | None:
+    if agent_core.get_llm() is not None:
+        return None
     backend = agent_core.llm_backend_name()
-    if agent_core.get_llm() is None:
-        return (
-            f"**Search-only mode** — LLM not reachable (`{backend}`). "
-            "Set **OLLAMA_BASE_URL** in Space secrets (Tailscale Funnel + `llama3.2:3b`). "
-            "The **Sources** tab still returns raw search results."
-        )
-    return f"**LLM:** `{backend}`"
+    return (
+        f"**Search-only mode** — LLM not reachable (`{backend}`). "
+        "Set **OLLAMA_BASE_URL** in Space secrets (Tailscale Funnel + `llama3.2:3b`). "
+        "The **Sources** tab still returns raw search results."
+    )
 
 
 def _format_sources_html(sources: list[dict]) -> str:
