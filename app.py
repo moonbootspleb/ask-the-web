@@ -185,8 +185,8 @@ with gr.Blocks(title="Ask the Web", fill_width=True) as demo:
                             scale=0,
                             min_width=44,
                         )
-                    with gr.Row(elem_classes="everstorm-chat-toolbar"):
-                        clear_btn = gr.Button("Clear chat", scale=0)
+                    with gr.Row(elem_classes="everstorm-chat-toolbar ask-web-toolbar"):
+                        clear_btn = gr.Button("Clear chat", scale=0, min_width=100)
                         gr.HTML(
                             '<p class="everstorm-chat-hint">Enter to send · Shift+Enter for new line</p>',
                         )
