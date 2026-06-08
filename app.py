@@ -155,7 +155,7 @@ with gr.Blocks(title="Ask the Web", fill_width=True) as demo:
     last_result = gr.State({})
 
     with gr.Tabs():
-        with gr.Tab("Ask", elem_classes="ask-web-tab-panel"):
+        with gr.Tab("Ask"):
             with gr.Column(elem_classes="ask-web-chat-shell"):
                 chatbot = gr.Chatbot(
                     value=WELCOME_MESSAGE,
@@ -191,24 +191,18 @@ with gr.Blocks(title="Ask the Web", fill_width=True) as demo:
                             '<p class="everstorm-chat-hint">Enter to send · Shift+Enter for new line</p>',
                         )
             ask_sources = gr.HTML(elem_classes="ask-web-sources")
-            gr.Examples(
-                examples=[[q] for q in EXAMPLE_QUESTIONS],
-                inputs=chat_in,
-                elem_classes="ask-web-examples",
-            )
+            with gr.Column(elem_classes="ask-web-examples"):
+                gr.Examples(examples=[[q] for q in EXAMPLE_QUESTIONS], inputs=chat_in)
 
-        with gr.Tab("Sources", elem_classes="ask-web-tab-panel"):
+        with gr.Tab("Sources"):
             src_q = gr.Textbox(label="Search query", lines=2, placeholder="e.g. latest AI agent frameworks")
             src_btn = gr.Button("Search", variant="primary")
             src_out = gr.HTML()
             src_btn.click(run_sources_only, inputs=src_q, outputs=src_out)
-            gr.Examples(
-                examples=[[q] for q in EXAMPLE_QUESTIONS],
-                inputs=src_q,
-                elem_classes="ask-web-examples",
-            )
+            with gr.Column(elem_classes="ask-web-examples"):
+                gr.Examples(examples=[[q] for q in EXAMPLE_QUESTIONS], inputs=src_q)
 
-        with gr.Tab("Steps", elem_classes="ask-web-tab-panel"):
+        with gr.Tab("Steps"):
             gr.Markdown("Tool-call trace from your last **Ask** question.")
             steps_out = gr.HTML()
 
