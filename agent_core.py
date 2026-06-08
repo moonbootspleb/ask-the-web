@@ -31,14 +31,15 @@ Your job is to SUMMARIZE specific facts from the snippets — not to tell the us
 
 Rules:
 1) Answer ONLY from the search results. Do not invent facts.
-2) Write 3–5 bullet points. Each bullet must state a concrete fact (who, what, when) from a snippet.
+2) Write one bullet per useful search result. Each bullet must state a concrete fact (who, what, when) from a snippet.
 3) End each bullet with an inline markdown link to the source: [title](url).
-4) NEVER say "you can find news on", "visit their website", "check out", or list sites without summarizing content.
-5) If snippets are thin, say what is missing. Do not output JSON or tool calls."""
+4) Start with the first bullet. No intro line — do not say "here are", "below are", or mention how many bullets you wrote.
+5) NEVER say "you can find news on", "visit their website", "check out", or list sites without summarizing content.
+6) If snippets are thin, say what is missing. Do not output JSON or tool calls."""
 
 STRICT_SYNTHESIS_PROMPT = SYNTHESIS_PROMPT + """
 
-IMPORTANT: Your previous attempt only pointed at websites. Rewrite as bullet-point facts extracted from the snippets."""
+IMPORTANT: Your previous attempt only pointed at websites. Rewrite as bullet-point facts extracted from the snippets. No intro line."""
 
 _NEWS_QUERY_HINTS = (
     "latest",
@@ -299,6 +300,36 @@ def _fallback_summary(question: str, results: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def _is_bullet_line(line: str) -> bool:
+    s = line.lstrip()
+    return s.startswith(("-", "*", "•")) or bool(re.match(r"^\d+\.", s))
+
+
+def _clean_synthesis_answer(text: str) -> str:
+    """Drop meta preambles like 'Here are 3-5 bullet points…' before the first bullet."""
+    lines = text.strip().splitlines()
+    if not lines:
+        return text
+
+    preamble = re.compile(
+        r"^(here are|below are|the following|summary:|brief:|\*\*summary\*\*)",
+        re.IGNORECASE,
+    )
+    while lines:
+        stripped = lines[0].strip()
+        if not stripped:
+            lines.pop(0)
+            continue
+        if _is_bullet_line(stripped):
+            break
+        if preamble.search(stripped) or re.search(r"bullet\s*points?", stripped, re.IGNORECASE):
+            lines.pop(0)
+            continue
+        break
+
+    return "\n".join(lines).strip() or text.strip()
+
+
 def _synthesize_answer(question: str, search_blob: str, llm: ChatOllama, *, strict: bool = False) -> str:
     system = STRICT_SYNTHESIS_PROMPT if strict else SYNTHESIS_PROMPT
     response = llm.invoke(
@@ -307,7 +338,7 @@ def _synthesize_answer(question: str, search_blob: str, llm: ChatOllama, *, stri
             HumanMessage(content=f"Question: {question}\n\nSearch results:\n{search_blob}"),
         ]
     )
-    return _message_content(response).strip()
+    return _clean_synthesis_answer(_message_content(response).strip())
 
 
 def _synthesis_trace_input(question: str, result_count: int) -> str:
