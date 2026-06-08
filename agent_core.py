@@ -25,13 +25,46 @@ Rules:
 4) If search results are insufficient, say what is missing.
 5) Be concise and direct."""
 
-SYNTHESIS_PROMPT = """You are a helpful research assistant. You are given DuckDuckGo search results.
+SYNTHESIS_PROMPT = """You are a research assistant writing a brief from web search snippets.
+
+Your job is to SUMMARIZE specific facts from the snippets — not to tell the user where to look.
 
 Rules:
-1) Answer ONLY from the search results — do not invent facts.
-2) Cite sources inline using markdown links: [title](url).
-3) If results are insufficient, say what is missing.
-4) Be concise and direct. Do not output JSON or tool calls."""
+1) Answer ONLY from the search results. Do not invent facts.
+2) Write 3–5 bullet points. Each bullet must state a concrete fact (who, what, when) from a snippet.
+3) End each bullet with an inline markdown link to the source: [title](url).
+4) NEVER say "you can find news on", "visit their website", "check out", or list sites without summarizing content.
+5) If snippets are thin, say what is missing. Do not output JSON or tool calls."""
+
+STRICT_SYNTHESIS_PROMPT = SYNTHESIS_PROMPT + """
+
+IMPORTANT: Your previous attempt only pointed at websites. Rewrite as bullet-point facts extracted from the snippets."""
+
+_NEWS_QUERY_HINTS = (
+    "latest",
+    "news",
+    "recent",
+    "today",
+    "yesterday",
+    "this week",
+    "breaking",
+    "current",
+    "update",
+)
+
+_GENERIC_ANSWER_MARKERS = (
+    "can be found on",
+    "can be found at",
+    "official website",
+    "various news sources",
+    "such as bloomberg",
+    "such as space.com",
+    "provides updates on",
+    "real-time coverage",
+    "visit their",
+    "check out",
+    "you can find",
+)
 
 NO_LLM_MESSAGE = (
     "LLM not configured. Set **OLLAMA_BASE_URL** (remote Ollama via Tailscale Funnel) "
@@ -93,21 +126,71 @@ def llm_backend_name() -> str:
     return f"ollama:{OLLAMA_MODEL}@127.0.0.1:11434"
 
 
+def _wants_news_search(query: str) -> bool:
+    q = query.lower()
+    return any(hint in q for hint in _NEWS_QUERY_HINTS)
+
+
+def _news_topic(query: str) -> str:
+    """Strip news-style question prefixes so DDGS news search gets a clean topic."""
+    q = query.strip().rstrip("?")
+    lowered = q.lower()
+    prefixes = (
+        "what is the latest news about ",
+        "what are the latest news about ",
+        "what's the latest news about ",
+        "latest news about ",
+        "recent news about ",
+        "what is the latest on ",
+        "what's the latest on ",
+        "latest on ",
+    )
+    for prefix in prefixes:
+        if lowered.startswith(prefix):
+            return q[len(prefix) :].strip()
+    return q
+
+
+def _normalize_search_row(item: dict[str, Any]) -> dict[str, str]:
+    return {
+        "title": item.get("title") or "",
+        "url": item.get("href") or item.get("link") or item.get("url") or "",
+        "snippet": item.get("body") or item.get("snippet") or item.get("excerpt") or "",
+    }
+
+
+def _search_news(topic: str, max_results: int) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    with DDGS() as ddgs:
+        for item in ddgs.news(topic, max_results=max_results):
+            row = _normalize_search_row(item)
+            if row["url"] or row["snippet"]:
+                rows.append(row)
+    return rows
+
+
+def _search_text(query: str, max_results: int) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    with DDGS() as ddgs:
+        for item in ddgs.text(query, max_results=max_results):
+            row = _normalize_search_row(item)
+            if row["url"] or row["snippet"]:
+                rows.append(row)
+    return rows
+
+
 def search_web_raw(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
     """Run DuckDuckGo search and return structured results."""
     if not query.strip():
         return []
-    rows: list[dict[str, str]] = []
-    with DDGS() as ddgs:
-        for item in ddgs.text(query, max_results=max_results):
-            rows.append(
-                {
-                    "title": item.get("title") or "",
-                    "url": item.get("href") or item.get("link") or "",
-                    "snippet": item.get("body") or item.get("snippet") or "",
-                }
-            )
-    return rows
+
+    if _wants_news_search(query):
+        topic = _news_topic(query)
+        news_rows = _search_news(topic, max_results=max_results)
+        if news_rows:
+            return news_rows
+
+    return _search_text(query, max_results=max_results)
 
 
 def format_search_results(results: list[dict[str, str]]) -> str:
@@ -179,6 +262,54 @@ def _looks_like_tool_json(text: str) -> bool:
     return t.startswith("{") and '"name"' in t and ("parameters" in t or "args" in t)
 
 
+def _is_generic_answer(text: str) -> bool:
+    t = text.lower().strip()
+    if not t:
+        return True
+    if _looks_like_tool_json(text):
+        return True
+    marker_hits = sum(1 for marker in _GENERIC_ANSWER_MARKERS if marker in t)
+    has_bullets = "\n-" in t or "\n*" in t or t.startswith(("-", "*"))
+    # Short answers that only point at outlets, with no bullet facts.
+    if marker_hits >= 2 and not has_bullets:
+        return True
+    if marker_hits >= 1 and len(t) < 280 and not has_bullets:
+        return True
+    return False
+
+
+def _fallback_summary(question: str, results: list[dict[str, str]]) -> str:
+    """Deterministic summary from snippets when the LLM only lists sources."""
+    lines = [f"Here is a summary of recent results for **{question.strip().rstrip('?')}**:\n"]
+    for row in results[:DEFAULT_MAX_RESULTS]:
+        title = row.get("title") or "Source"
+        url = row.get("url") or ""
+        snippet = (row.get("snippet") or "").strip()
+        if not snippet:
+            continue
+        if not snippet.endswith("."):
+            snippet += "."
+        link = f"[{title}]({url})" if url else title
+        lines.append(f"- {snippet} — {link}")
+    if len(lines) == 1:
+        return (
+            f"I found sources for **{question.strip().rstrip('?')}**, "
+            "but the snippets were too short to summarize. See the **Sources** tab."
+        )
+    return "\n".join(lines)
+
+
+def _synthesize_answer(question: str, search_blob: str, llm: ChatOllama, *, strict: bool = False) -> str:
+    system = STRICT_SYNTHESIS_PROMPT if strict else SYNTHESIS_PROMPT
+    response = llm.invoke(
+        [
+            SystemMessage(content=system),
+            HumanMessage(content=f"Question: {question}\n\nSearch results:\n{search_blob}"),
+        ]
+    )
+    return _message_content(response).strip()
+
+
 def _invoke_search_then_answer(question: str, llm: ChatOllama) -> dict[str, Any]:
     """Reliable Perplexity-style path: search first, then synthesize with the LLM."""
     query = question.strip()
@@ -195,18 +326,16 @@ def _invoke_search_then_answer(question: str, llm: ChatOllama) -> dict[str, Any]
             "llm_available": True,
         }
 
-    response = llm.invoke(
-        [
-            SystemMessage(content=SYNTHESIS_PROMPT),
-            HumanMessage(content=f"Question: {query}\n\nSearch results:\n{search_blob}"),
-        ]
-    )
-    answer = _message_content(response).strip()
+    answer = _synthesize_answer(query, search_blob, llm)
+    if _is_generic_answer(answer):
+        retry = _synthesize_answer(query, search_blob, llm, strict=True)
+        if retry and not _is_generic_answer(retry):
+            answer = retry
+        else:
+            answer = _fallback_summary(query, results)
+
     if not answer or _looks_like_tool_json(answer):
-        answer = (
-            f"I found results for **{query}**, but couldn't summarize them cleanly. "
-            "See the sources below."
-        )
+        answer = _fallback_summary(query, results)
 
     for url in _extract_urls(answer):
         if not any(s["url"] == url for s in sources):
