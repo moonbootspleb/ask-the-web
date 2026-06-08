@@ -8,7 +8,7 @@ sdk_version: "6.0.0"
 python_version: "3.11"
 app_file: app.py
 pinned: false
-short_description: Perplexity-style web search agent with tool calling and citations.
+short_description: Web search agent with tool calling and citations.
 ---
 
 # Ask the Web — Hugging Face Space
