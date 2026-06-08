@@ -156,6 +156,8 @@ def _extract_urls(text: str) -> list[str]:
 
 def invoke_with_trace(question: str) -> dict[str, Any]:
     """Run the web agent and return answer, sources, and tool steps."""
+    if not isinstance(question, str):
+        question = str(question)
     if not question.strip():
         return {"answer": "Enter a question.", "sources": [], "tool_steps": [], "llm_available": False}
 

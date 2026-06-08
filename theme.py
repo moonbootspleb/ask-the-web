@@ -507,6 +507,38 @@ footer {{ display: none !important; }}
     width: 100% !important;
 }}
 
+.ask-web-steps {{
+    margin-top: 0.25rem !important;
+}}
+
+.ask-web-steps:empty {{
+    display: none !important;
+}}
+
+.gradio-container .tabs {{
+    margin-top: 0.35rem !important;
+}}
+
+.gradio-container .tabitem {{
+    background: transparent !important;
+    padding: 0.35rem 0 0 !important;
+    border: none !important;
+}}
+
+.gradio-container .tab-nav {{
+    gap: 0.25rem !important;
+    border-bottom: 1px solid {HAIRLINE} !important;
+    margin-bottom: 0.35rem !important;
+}}
+
+.ask-web-chat-shell .everstorm-chat-input-row [class*="submit"] {{
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}}
+
 .ask-web-examples .block,
 .ask-web-examples .form,
 .ask-web-examples .wrap {{

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import html
 import sys
+import traceback
 from pathlib import Path
+from typing import Any
 
 import gradio as gr
 
@@ -44,6 +46,25 @@ WELCOME_MESSAGE = [
 ]
 
 
+def _content_text(content: Any) -> str:
+    """Normalize Gradio 6 chat content (str or list of blocks) to plain text."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(
+                    str(block.get("text") or block.get("content") or block.get("value") or "")
+                )
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(p for p in parts if p)
+    return str(content)
+
+
 def _status_banner() -> str | None:
     if agent_core.get_llm() is not None:
         return None
@@ -57,7 +78,7 @@ def _status_banner() -> str | None:
 
 def _format_sources_html(sources: list[dict]) -> str:
     if not sources:
-        return "<p style='color:rgba(255,255,255,0.5);'>No sources yet.</p>"
+        return "<p style='color:rgba(255,255,255,0.5);margin:0;'>No sources yet.</p>"
     blocks = []
     for i, s in enumerate(sources, 1):
         title = html.escape(s.get("title") or "Source")
@@ -70,10 +91,10 @@ def _format_sources_html(sources: list[dict]) -> str:
             else ""
         )
         blocks.append(
-            f'<div style="margin:8px 0;padding:12px;border:1px solid {HAIRLINE};'
-            f'border-radius:0.75rem;background:{ORBITAL};">'
-            f'<p style="margin:0 0 6px;color:{INK};font-family:monospace;">[{i}] {link}</p>'
-            f'<p style="margin:0;color:rgba(255,255,255,0.45);font-size:0.85em;">{url}</p>'
+            f'<div style="margin:6px 0;padding:10px 12px;border:1px solid {HAIRLINE};'
+            f'border-radius:0.65rem;background:{ORBITAL};">'
+            f'<p style="margin:0 0 4px;color:{INK};font-family:monospace;font-size:0.9em;">[{i}] {link}</p>'
+            f'<p style="margin:0;color:rgba(255,255,255,0.45);font-size:0.82em;">{url}</p>'
             f"{snippet_html}</div>"
         )
     return "".join(blocks)
@@ -81,26 +102,31 @@ def _format_sources_html(sources: list[dict]) -> str:
 
 def _format_steps_html(steps: list[dict]) -> str:
     if not steps:
-        return "<p style='color:rgba(255,255,255,0.5);'>No tool steps yet. Ask a question on the **Ask** tab.</p>"
-    blocks = []
+        return ""
+    blocks = [
+        '<p style="margin:0 0 0.5rem;font-size:0.72rem;font-family:monospace;'
+        'letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.38);">Tool trace</p>'
+    ]
     for i, step in enumerate(steps, 1):
         tool = html.escape(step.get("tool", "tool"))
         inp = html.escape(step.get("input", ""))
         out = html.escape((step.get("output") or "")[:1200])
         input_html = (
-            f'<p style="margin:8px 0 0;color:rgba(255,255,255,0.55);"><strong>Input:</strong> {inp}</p>'
+            f'<p style="margin:6px 0 0;color:rgba(255,255,255,0.55);font-size:0.88em;">'
+            f"<strong>Input:</strong> {inp}</p>"
             if inp
             else ""
         )
         output_html = (
-            f'<pre style="margin:8px 0 0;white-space:pre-wrap;color:rgba(255,255,255,0.55);font-size:0.85em;">{out}</pre>'
+            f'<pre style="margin:6px 0 0;white-space:pre-wrap;color:rgba(255,255,255,0.5);'
+            f'font-size:0.82em;">{out}</pre>'
             if out
             else ""
         )
         blocks.append(
-            f'<details style="margin:8px 0;border:1px solid {HAIRLINE};'
-            f'border-radius:0.75rem;padding:8px 12px;background:{ORBITAL};" open>'
-            f'<summary style="cursor:pointer;color:{INK};font-family:monospace;">'
+            f'<details style="margin:4px 0;border:1px solid {HAIRLINE};'
+            f'border-radius:0.65rem;padding:6px 10px;background:{ORBITAL};">'
+            f'<summary style="cursor:pointer;color:{INK};font-family:monospace;font-size:0.88em;">'
             f"Step {i}: {tool}</summary>{input_html}{output_html}</details>"
         )
     return "".join(blocks)
@@ -109,7 +135,10 @@ def _format_steps_html(steps: list[dict]) -> str:
 def stage_user_message(message: str, history: list[dict]) -> tuple[list[dict], dict]:
     if not message.strip():
         return history, gr.update()
-    return history + [{"role": "user", "content": message.strip()}], gr.update(value="", interactive=False)
+    return (
+        history + [{"role": "user", "content": message.strip()}],
+        gr.update(value="", interactive=False),
+    )
 
 
 def complete_assistant_response(
@@ -117,21 +146,36 @@ def complete_assistant_response(
 ) -> tuple[list[dict], dict, str, str, dict]:
     if not history or history[-1].get("role") != "user":
         return history, {}, "", "", gr.update(interactive=True)
-    question = history[-1]["content"]
-    result = agent_core.invoke_with_trace(question)
-    answer = result["answer"]
-    if not result.get("llm_available"):
-        answer = (
-            f"_{agent_core.NO_LLM_MESSAGE}_\n\n**Raw search preview:**\n\n"
-            f"{agent_core.format_search_results(result.get('sources', []))}"
+
+    question = _content_text(history[-1].get("content")).strip()
+    if not question:
+        return history, {}, "", "", gr.update(interactive=True)
+
+    try:
+        result = agent_core.invoke_with_trace(question)
+        answer = result["answer"]
+        if not result.get("llm_available"):
+            answer = (
+                f"_{agent_core.NO_LLM_MESSAGE}_\n\n**Raw search preview:**\n\n"
+                f"{agent_core.format_search_results(result.get('sources', []))}"
+            )
+        steps_html = _format_steps_html(result.get("tool_steps") or [])
+        return (
+            history + [{"role": "assistant", "content": answer}],
+            result,
+            _format_sources_html(result.get("sources") or []),
+            steps_html,
+            gr.update(interactive=True),
         )
-    return (
-        history + [{"role": "assistant", "content": answer}],
-        result,
-        _format_sources_html(result.get("sources") or []),
-        _format_steps_html(result.get("tool_steps") or []),
-        gr.update(interactive=True),
-    )
+    except Exception as exc:
+        err = f"Sorry — something went wrong running the agent.\n\n`{exc}`"
+        return (
+            history + [{"role": "assistant", "content": err}],
+            {},
+            "",
+            f"<pre style='color:rgba(255,255,255,0.55);font-size:0.85em;'>{html.escape(traceback.format_exc())}</pre>",
+            gr.update(interactive=True),
+        )
 
 
 def run_sources_only(query: str) -> str:
@@ -147,7 +191,7 @@ def clear_chat() -> tuple:
 _moonboots_theme = build_moonboots_theme()
 
 with gr.Blocks(title="Ask the Web", fill_width=True) as demo:
-    gr.HTML(ASK_THE_WEB_HERO_HTML)
+    gr.HTML(ASK_THE_WEB_HERO_HTML, elem_classes="ask-web-hero")
     _banner = _status_banner()
     if _banner:
         gr.Markdown(_banner, elem_classes="ask-web-status")
@@ -159,11 +203,11 @@ with gr.Blocks(title="Ask the Web", fill_width=True) as demo:
             with gr.Column(elem_classes="ask-web-chat-shell"):
                 chatbot = gr.Chatbot(
                     value=WELCOME_MESSAGE,
-                    height=300,
+                    height=280,
                     show_label=False,
                     layout="bubble",
                     autoscroll=True,
-                    elem_classes="ask-web-chat-messages everstorm-chat-messages",
+                    elem_classes="ask-web-chat-messages",
                 )
                 with gr.Column(elem_classes="everstorm-chat-composer"):
                     with gr.Row(elem_classes="everstorm-chat-input-row"):
@@ -186,35 +230,36 @@ with gr.Blocks(title="Ask the Web", fill_width=True) as demo:
                             min_width=44,
                         )
                     with gr.Row(elem_classes="everstorm-chat-toolbar ask-web-toolbar"):
-                        clear_btn = gr.Button("Clear chat", scale=0, min_width=100)
+                        clear_btn = gr.Button("Clear chat", scale=0)
                         gr.HTML(
                             '<p class="everstorm-chat-hint">Enter to send · Shift+Enter for new line</p>',
                         )
-            ask_sources = gr.HTML(elem_classes="ask-web-sources")
-            with gr.Column(elem_classes="ask-web-examples"):
-                gr.Examples(examples=[[q] for q in EXAMPLE_QUESTIONS], inputs=chat_in)
+            ask_sources = gr.HTML(value="", elem_classes="ask-web-sources")
+            ask_steps = gr.HTML(value="", elem_classes="ask-web-steps")
+            gr.Examples(examples=[[q] for q in EXAMPLE_QUESTIONS], inputs=chat_in)
 
         with gr.Tab("Sources"):
             src_q = gr.Textbox(label="Search query", lines=2, placeholder="e.g. latest AI agent frameworks")
             src_btn = gr.Button("Search", variant="primary")
             src_out = gr.HTML()
             src_btn.click(run_sources_only, inputs=src_q, outputs=src_out)
-            with gr.Column(elem_classes="ask-web-examples"):
-                gr.Examples(examples=[[q] for q in EXAMPLE_QUESTIONS], inputs=src_q)
+            gr.Examples(examples=[[q] for q in EXAMPLE_QUESTIONS], inputs=src_q)
 
         with gr.Tab("Steps"):
-            gr.Markdown("Tool-call trace from your last **Ask** question.")
-            steps_out = gr.HTML()
+            gr.Markdown(
+                "Tool-call trace from your last **Ask** question appears on the **Ask** tab "
+                "under **Sources**, after you submit a question."
+            )
 
     _submit = dict(fn=stage_user_message, inputs=[chat_in, chatbot], outputs=[chatbot, chat_in])
     _reply = dict(
         fn=complete_assistant_response,
         inputs=[chatbot],
-        outputs=[chatbot, last_result, ask_sources, steps_out, chat_in],
+        outputs=[chatbot, last_result, ask_sources, ask_steps, chat_in],
     )
     chat_btn.click(**_submit).then(**_reply)
     chat_in.submit(**_submit).then(**_reply)
-    clear_btn.click(clear_chat, outputs=[chatbot, last_result, ask_sources, steps_out, chat_in])
+    clear_btn.click(clear_chat, outputs=[chatbot, last_result, ask_sources, ask_steps, chat_in])
 
 demo.launch(
     ssr_mode=False,
