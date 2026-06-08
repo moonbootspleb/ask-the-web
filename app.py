@@ -105,7 +105,7 @@ def _format_steps_html(steps: list[dict]) -> str:
         return ""
     blocks = [
         '<p style="margin:0 0 0.5rem;font-size:0.72rem;font-family:monospace;'
-        'letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.38);">Tool trace</p>'
+        'letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.38);">Agent trace</p>'
     ]
     for i, step in enumerate(steps, 1):
         tool = html.escape(step.get("tool", "tool"))
@@ -247,8 +247,8 @@ with gr.Blocks(title="Ask the Web", fill_width=True) as demo:
 
         with gr.Tab("Steps"):
             gr.Markdown(
-                "Tool-call trace from your last **Ask** question appears on the **Ask** tab "
-                "under **Sources**, after you submit a question."
+                "After you submit on **Ask**, the trace below **Sources** shows each step: "
+                "**search_web** → **synthesize_answer** (LLM summary), and **snippet_fallback** if needed."
             )
 
     _submit = dict(fn=stage_user_message, inputs=[chat_in, chatbot], outputs=[chatbot, chat_in])

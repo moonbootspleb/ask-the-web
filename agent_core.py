@@ -310,12 +310,21 @@ def _synthesize_answer(question: str, search_blob: str, llm: ChatOllama, *, stri
     return _message_content(response).strip()
 
 
+def _synthesis_trace_input(question: str, result_count: int) -> str:
+    return (
+        f"Question: {question}\n"
+        f"Synthesize an answer from {result_count} search result(s) (see search_web step)."
+    )
+
+
 def _invoke_search_then_answer(question: str, llm: ChatOllama) -> dict[str, Any]:
     """Reliable Perplexity-style path: search first, then synthesize with the LLM."""
     query = question.strip()
     results = search_web_raw(query)
     search_blob = format_search_results(results)
-    tool_steps = [{"tool": "search_web", "input": query, "output": search_blob}]
+    tool_steps: list[dict[str, str]] = [
+        {"tool": "search_web", "input": query, "output": search_blob},
+    ]
     sources = _results_to_sources(results)
 
     if not results:
@@ -327,15 +336,37 @@ def _invoke_search_then_answer(question: str, llm: ChatOllama) -> dict[str, Any]
         }
 
     answer = _synthesize_answer(query, search_blob, llm)
+    tool_steps.append(
+        {
+            "tool": "synthesize_answer",
+            "input": _synthesis_trace_input(query, len(results)),
+            "output": answer,
+        }
+    )
+
     if _is_generic_answer(answer):
         retry = _synthesize_answer(query, search_blob, llm, strict=True)
+        tool_steps.append(
+            {
+                "tool": "synthesize_answer",
+                "input": f"Strict retry — {_synthesis_trace_input(query, len(results))}",
+                "output": retry or "(no response)",
+            }
+        )
         if retry and not _is_generic_answer(retry):
             answer = retry
         else:
             answer = _fallback_summary(query, results)
+            tool_steps.append(
+                {"tool": "snippet_fallback", "input": query, "output": answer},
+            )
 
     if not answer or _looks_like_tool_json(answer):
         answer = _fallback_summary(query, results)
+        if tool_steps[-1].get("tool") != "snippet_fallback":
+            tool_steps.append(
+                {"tool": "snippet_fallback", "input": query, "output": answer},
+            )
 
     for url in _extract_urls(answer):
         if not any(s["url"] == url for s in sources):
