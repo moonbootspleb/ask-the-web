@@ -404,19 +404,136 @@ footer {{ display: none !important; }}
     overflow-y: auto !important;
 }}
 
-.ask-web-chat-shell .bot hr,
-.ask-web-chat-shell .bubble.bot hr {{
-    margin: 0.65rem 0 0.45rem !important;
+.ask-web-source-footnotes,
+.gradio-container .ask-web-source-footnotes {{
+    margin: 0 !important;
+    padding: 0 !important;
+    background: {CANVAS_RAISED} !important;
     border: none !important;
-    border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
 }}
 
-.ask-web-chat-shell .bot p:last-child,
-.ask-web-chat-shell .bubble.bot p:last-child {{
-    font-size: 0.82em !important;
-    line-height: 1.55 !important;
-    color: rgba(255, 255, 255, 0.52) !important;
-    margin-top: 0 !important;
+.ask-web-source-footnotes .block,
+.ask-web-source-footnotes .wrap,
+.ask-web-source-footnotes .form,
+.ask-web-source-footnotes .prose {{
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: none !important;
+}}
+
+.ask-web-source-footnotes .ask-web-source-footnotes {{
+    padding: 0.35rem 0.85rem 0.55rem !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+}}
+
+.ask-web-source-footnotes-label {{
+    margin: 0 0 0.4rem !important;
+    font-size: 0.68rem !important;
+    font-family: ui-monospace, monospace !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    color: rgba(255, 255, 255, 0.35) !important;
+}}
+
+.ask-web-source-pills {{
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 0.4rem !important;
+    align-items: flex-start !important;
+}}
+
+.ask-web-source-pill {{
+    position: relative !important;
+    flex: 0 1 auto !important;
+}}
+
+.ask-web-source-pill > summary {{
+    list-style: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 0.35rem !important;
+    max-width: 14rem !important;
+    padding: 0.28rem 0.65rem 0.28rem 0.45rem !important;
+    border-radius: 999px !important;
+    border: 1px solid {HAIRLINE} !important;
+    background: {ORBITAL} !important;
+    color: {INK} !important;
+    font-size: 0.78rem !important;
+    line-height: 1.35 !important;
+    cursor: pointer !important;
+    user-select: none !important;
+}}
+
+.ask-web-source-pill > summary::-webkit-details-marker {{
+    display: none !important;
+}}
+
+.ask-web-source-pill > summary:hover {{
+    border-color: {HAIRLINE_STRONG} !important;
+    color: #fff !important;
+}}
+
+.ask-web-source-pill[open] > summary {{
+    border-color: #8edce6 !important;
+}}
+
+.ask-web-pill-num {{
+    flex: 0 0 auto !important;
+    font-family: ui-monospace, monospace !important;
+    font-size: 0.72rem !important;
+    color: #8edce6 !important;
+}}
+
+.ask-web-pill-preview {{
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}}
+
+.ask-web-pill-panel {{
+    margin-top: 0.35rem !important;
+    padding: 0.55rem 0.65rem !important;
+    border-radius: 0.65rem !important;
+    border: 1px solid {HAIRLINE} !important;
+    background: #0c0d10 !important;
+    font-size: 0.8rem !important;
+    line-height: 1.45 !important;
+    min-width: min(100%, 18rem) !important;
+    max-width: 22rem !important;
+}}
+
+.ask-web-pill-title {{
+    display: block !important;
+    color: #8edce6 !important;
+    text-decoration: none !important;
+    font-weight: 500 !important;
+    margin-bottom: 0.25rem !important;
+}}
+
+.ask-web-pill-title:hover {{
+    text-decoration: underline !important;
+}}
+
+.ask-web-pill-url {{
+    display: block !important;
+    color: rgba(255, 255, 255, 0.42) !important;
+    font-size: 0.74rem !important;
+    word-break: break-all !important;
+    margin-bottom: 0.35rem !important;
+}}
+
+.ask-web-pill-snippet {{
+    margin: 0 !important;
+    color: rgba(255, 255, 255, 0.58) !important;
+    font-size: 0.78rem !important;
+    line-height: 1.45 !important;
+}}
+
+.ask-web-source-footnotes:not(:has(.ask-web-source-pill)) {{
+    display: none !important;
 }}
 
 .ask-web-chat-shell .bot a,
@@ -697,8 +814,23 @@ function everstormChatComposerKeydown(e) {
     if (send) send.click();
 }
 
+function askWebSourcePillInit() {
+    document.querySelectorAll('.ask-web-source-pills').forEach((row) => {
+        if (row.dataset.bound) return;
+        row.dataset.bound = '1';
+        row.addEventListener('toggle', (e) => {
+            const pill = e.target;
+            if (!pill.classList.contains('ask-web-source-pill') || !pill.open) return;
+            row.querySelectorAll('.ask-web-source-pill[open]').forEach((p) => {
+                if (p !== pill) p.open = false;
+            });
+        }, true);
+    });
+}
+
 function everstormChatComposerInit() {
     everstormPaintChatSurface();
+    askWebSourcePillInit();
     document.removeEventListener('keydown', everstormChatComposerKeydown, true);
     document.addEventListener('keydown', everstormChatComposerKeydown, true);
 }

@@ -76,44 +76,57 @@ def _status_banner() -> str | None:
     )
 
 
-def _format_sources_footnote(sources: list[dict]) -> str:
-    """Compact markdown footnote appended to the assistant reply."""
+def _format_source_pills_html(sources: list[dict]) -> str:
+    """Expandable source pills shown as footnotes below the latest reply."""
     if not sources:
         return ""
-    links: list[str] = []
+
+    pills: list[str] = []
     seen: set[str] = set()
-    for i, s in enumerate(sources, 1):
+    for s in sources:
         url = (s.get("url") or "").strip()
         if not url or url in seen:
             continue
         seen.add(url)
+        num = len(pills) + 1
         title = html.unescape(s.get("title") or "Source")
-        if len(title) > 72:
-            title = title[:69] + "…"
-        links.append(f"[{len(links) + 1}] [{title}]({url})")
-    if not links:
+        snippet = html.unescape(s.get("snippet") or "").strip()
+        safe_title = html.escape(title)
+        safe_url = html.escape(url)
+        safe_snippet = html.escape(snippet)
+        snippet_html = (
+            f'<p class="ask-web-pill-snippet">{safe_snippet}</p>' if safe_snippet else ""
+        )
+        pills.append(
+            f'<details class="ask-web-source-pill">'
+            f'<summary title="{safe_title}">'
+            f'<span class="ask-web-pill-num">{num}</span>'
+            f'<span class="ask-web-pill-preview">{safe_title}</span>'
+            f"</summary>"
+            f'<div class="ask-web-pill-panel">'
+            f'<a class="ask-web-pill-title" href="{safe_url}" target="_blank" rel="noopener">{safe_title}</a>'
+            f'<span class="ask-web-pill-url">{safe_url}</span>'
+            f"{snippet_html}"
+            f"</div>"
+            f"</details>"
+        )
+
+    if not pills:
         return ""
-    return "\n\n---\n" + " · ".join(links)
+
+    return (
+        '<div class="ask-web-source-footnotes">'
+        '<p class="ask-web-source-footnotes-label">Sources</p>'
+        f'<div class="ask-web-source-pills">{"".join(pills)}</div>'
+        "</div>"
+    )
 
 
 def _format_sources_html(sources: list[dict], *, compact: bool = False) -> str:
     if not sources:
         return "<p style='color:rgba(255,255,255,0.5);margin:0;'>No sources yet.</p>"
     if compact:
-        items = []
-        for i, s in enumerate(sources, 1):
-            title = html.escape(s.get("title") or "Source")
-            url = html.escape(s.get("url") or "")
-            if not url:
-                continue
-            link = f'<a href="{url}" target="_blank" rel="noopener" style="color:#8edce6;">{title}</a>'
-            items.append(
-                f'<span style="margin-right:0.65rem;">[{i}] {link}</span>'
-            )
-        return (
-            f'<p style="margin:0;font-size:0.82em;line-height:1.6;color:rgba(255,255,255,0.55);">'
-            f'{" ".join(items)}</p>'
-        )
+        return _format_source_pills_html(sources)
     blocks = []
     for i, s in enumerate(sources, 1):
         title = html.escape(s.get("title") or "Source")
@@ -179,13 +192,13 @@ def stage_user_message(message: str, history: list[dict]) -> tuple[list[dict], d
 
 def complete_assistant_response(
     history: list[dict],
-) -> tuple[list[dict], dict, str, dict]:
+) -> tuple[list[dict], dict, str, str, dict]:
     if not history or history[-1].get("role") != "user":
-        return history, {}, "", gr.update(interactive=True)
+        return history, {}, "", "", gr.update(interactive=True)
 
     question = _content_text(history[-1].get("content")).strip()
     if not question:
-        return history, {}, "", gr.update(interactive=True)
+        return history, {}, "", "", gr.update(interactive=True)
 
     try:
         result = agent_core.invoke_with_trace(question)
@@ -196,14 +209,12 @@ def complete_assistant_response(
                 f"_{agent_core.NO_LLM_MESSAGE}_\n\n**Raw search preview:**\n\n"
                 f"{agent_core.format_search_results(sources)}"
             )
-        else:
-            footnote = _format_sources_footnote(sources)
-            if footnote:
-                answer = answer + footnote
+        pills_html = _format_source_pills_html(sources)
         steps_html = _format_steps_html(result.get("tool_steps") or [])
         return (
             history + [{"role": "assistant", "content": answer}],
             result,
+            pills_html,
             steps_html,
             gr.update(interactive=True),
         )
@@ -212,6 +223,7 @@ def complete_assistant_response(
         return (
             history + [{"role": "assistant", "content": err}],
             {},
+            "",
             f"<pre style='color:rgba(255,255,255,0.55);font-size:0.85em;'>{html.escape(traceback.format_exc())}</pre>",
             gr.update(interactive=True),
         )
@@ -224,7 +236,7 @@ def run_sources_only(query: str) -> str:
 
 
 def clear_chat() -> tuple:
-    return WELCOME_MESSAGE, {}, "", gr.update(interactive=True)
+    return WELCOME_MESSAGE, {}, "", "", gr.update(interactive=True)
 
 
 _moonboots_theme = build_moonboots_theme()
@@ -248,6 +260,7 @@ with gr.Blocks(title="Ask the Web", fill_width=True) as demo:
                     autoscroll=True,
                     elem_classes="ask-web-chat-messages",
                 )
+                ask_sources = gr.HTML(value="", elem_classes="ask-web-source-footnotes")
                 with gr.Column(elem_classes="everstorm-chat-composer"):
                     with gr.Row(elem_classes="everstorm-chat-input-row"):
                         chat_in = gr.Textbox(
@@ -287,18 +300,18 @@ with gr.Blocks(title="Ask the Web", fill_width=True) as demo:
             gr.Markdown(
                 "After you submit on **Ask**, expand **Agent trace** under the chat to see "
                 "**search_web** → **synthesize_answer** (and **snippet_fallback** if needed). "
-                "Sources appear as footnotes on each reply."
+                "Sources appear as expandable pills below each reply."
             )
 
     _submit = dict(fn=stage_user_message, inputs=[chat_in, chatbot], outputs=[chatbot, chat_in])
     _reply = dict(
         fn=complete_assistant_response,
         inputs=[chatbot],
-        outputs=[chatbot, last_result, ask_steps, chat_in],
+        outputs=[chatbot, last_result, ask_sources, ask_steps, chat_in],
     )
     chat_btn.click(**_submit).then(**_reply)
     chat_in.submit(**_submit).then(**_reply)
-    clear_btn.click(clear_chat, outputs=[chatbot, last_result, ask_steps, chat_in])
+    clear_btn.click(clear_chat, outputs=[chatbot, last_result, ask_sources, ask_steps, chat_in])
 
 demo.launch(
     ssr_mode=False,
